@@ -4,10 +4,12 @@ import { useRouter } from 'next/router';
 import { 
   Building2, Briefcase, Play, Send, Bot, User as UserIcon, 
   CheckCircle2, XCircle, Lightbulb, TrendingUp, Award, 
-  Target, GraduationCap, MessageSquare, Lock
+  Target, GraduationCap, MessageSquare, Lock, AlertTriangle
 } from 'lucide-react';
 import { mockMateApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
+import ProctoringMonitor from '@/components/ProctoringMonitor';
+import ProctoringReportModal from '@/components/ProctoringReportModal';
 
 type Message = {
   role: 'assistant' | 'user';
@@ -49,6 +51,12 @@ export default function MockMate() {
   // Feedback State
   const [lastCoaching, setLastCoaching] = useState<Coaching | null>(null);
   const [finalReport, setFinalReport] = useState<FinalReport | null>(null);
+  
+  // Proctoring State
+  const [showProctoringMonitor, setShowProctoringMonitor] = useState(false);
+  const [showProctoringReport, setShowProctoringReport] = useState(false);
+  const [proctoringFlagged, setProctoringFlagged] = useState(false);
+  const [proctoringFlagReason, setProctoringFlagReason] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -80,6 +88,9 @@ export default function MockMate() {
       const openingMsg = res.data.first_message || res.data.response || res.data.message || 'Hello! I am your AI interviewer. Let us begin.';
       setMessages([{ role: 'assistant', content: openingMsg }]);
       setSessionActive(true);
+      
+      // Start proctoring for this session
+      setShowProctoringMonitor(true);
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to start session. Please ensure you are logged in.');
     } finally {
@@ -111,6 +122,25 @@ export default function MockMate() {
       setMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I had trouble processing that. Could you try answering again?" }]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFlagSession = (reason: string) => {
+    setProctoringFlagged(true);
+    setProctoringFlagReason(reason);
+    setShowProctoringMonitor(false);
+    setSessionActive(false);
+  };
+
+  const handleEndSession = async () => {
+    if (!sessionId) return;
+    
+    try {
+      // Close proctoring and show report
+      setShowProctoringMonitor(false);
+      setShowProctoringReport(true);
+    } catch (err) {
+      console.error('Error ending session:', err);
     }
   };
 

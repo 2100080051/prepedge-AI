@@ -59,10 +59,20 @@ class InterviewSession(Base):
     duration_minutes = Column(Integer)
     score = Column(Float, default=0.0)
     status = Column(String(50), default="active")  # active, completed
+    
+    # Proctoring fields
+    proctoring_enabled = Column(Boolean, default=True)
+    proctoring_status = Column(String(50), default="clean")  # clean, flagged, review_needed, cancelled
+    is_flagged = Column(Boolean, default=False)
+    flag_reason = Column(Text, nullable=True)
+    total_violations = Column(Integer, default=0)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User", back_populates="interview_sessions")
     messages = relationship("InterviewMessage", back_populates="session")
+    proctoring_events = relationship("ProctoringEvent", back_populates="session")
+    proctoring_report = relationship("ProctoringReport", back_populates="session", uselist=False)
 
 class InterviewMessage(Base):
     __tablename__ = "interview_messages"
@@ -104,6 +114,58 @@ class Payment(Base):
     
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
+    razorpay_order_id = Column(String(100), unique=True)
+    razorpay_payment_id = Column(String(100), unique=True, nullable=True)
+    amount = Column(Float)
+    currency = Column(String(10), default="INR")
+    status = Column(String(50), default="pending")  # pending, completed, failed
+    subscription_plan = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ===== PROCTORING MODELS =====
+
+class ProctoringEvent(Base):
+    __tablename__ = "proctoring_events"
+    
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("interview_sessions.id"))
+    event_type = Column(String(50))  # face_not_detected, multiple_faces, tab_switch, copy_paste, etc
+    severity = Column(Integer)  # 1=low, 2=medium, 3=high, 4=critical
+    description = Column(Text)
+    data = Column(Text)  # JSON with additional details
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    
+    session = relationship("InterviewSession", back_populates="proctoring_events")
+
+
+class ProctoringReport(Base):
+    __tablename__ = "proctoring_reports"
+    
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("interview_sessions.id"), unique=True)
+    total_violations = Column(Integer, default=0)
+    max_severity = Column(Integer, default=0)
+    severity_rating = Column(String(50))  # low, medium, high, critical
+    
+    # Violation breakdown
+    face_not_detected_count = Column(Integer, default=0)
+    multiple_faces_count = Column(Integer, default=0)
+    tab_switch_count = Column(Integer, default=0)
+    copy_paste_count = Column(Integer, default=0)
+    window_unfocus_count = Column(Integer, default=0)
+    unusual_input_count = Column(Integer, default=0)
+    
+    # Final assessment
+    proctoring_result = Column(String(50))  # CLEAN, NEEDS_VERIFICATION, FLAGGED_FOR_REVIEW
+    recommendation = Column(Text)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    session = relationship("InterviewSession", back_populates="proctoring_report")
     razorpay_order_id = Column(String(100), unique=True)
     razorpay_payment_id = Column(String(100), unique=True, nullable=True)
     amount = Column(Float)
