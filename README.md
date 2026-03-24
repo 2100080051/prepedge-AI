@@ -116,64 +116,14 @@ npm run dev
 
 The app will be available at: `http://localhost:3000`
 
-## 4-Week Build Plan
+## Features
 
-### Week 1: Foundation + FlashLearn (✅ Complete)
-- [x] Project structure setup
-- [x] Database models and schemas
-- [x] Authentication (JWT)
-- [x] FlashLearn API endpoints
-- [x] FlashLearn web UI
-- [x] Sample flashcard data seeding
-
-**Current Status**: Start your backend and frontend to test FlashLearn
-
-### Week 2: ResumeAI Module
-- [ ] Resume file upload API
-- [ ] PDF/DOCX parsing
-- [ ] OpenAI integration for analysis
-- [ ] Resume feedback endpoints
-- [ ] Frontend resume upload UI
-- [ ] Feedback display component
-
-### Week 3: MockMate Module
-- [ ] Interview session management
-- [ ] LangChain ConversationChain integration
-- [ ] Chroma vector database setup
-- [ ] Question generation from RAG
-- [ ] Interview UI with chat interface
-- [ ] Session scoring system
-
-### Week 4: Payments & Launch
-- [ ] Razorpay payment integration
-- [ ] Subscription plan logic
-- [ ] Payment webhook handling
-- [ ] Deployment setup
-- [ ] Performance optimization
-- [ ] Launch monitoring
-
-## Quick Start (Testing Both Servers)
-
-### Terminal 1 - Backend:
-```bash
-cd backend
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-python main.py
-```
-
-### Terminal 2 - Frontend:
-```bash
-cd frontend
-npm run dev
-```
-
-### Testing the App:
-1. Open `http://localhost:3000` in browser
-2. Click "Sign Up Free" or go to `/auth/register`
-3. Create test account
-4. Navigate to FlashLearn
-5. Click "Seed Database" (first time)
-6. Start studying!
+- **FlashLearn**: AI-powered flashcard learning system
+- **LearnAI**: Intelligent concept explanations with real-world analogies and examples
+- **ResumeAI**: Resume analysis and optimization with ATS scoring
+- **MockMate**: AI-powered mock interview preparation with proctoring
+- **Authentication**: Secure JWT-based user authentication
+- **Payment Integration**: Razorpay payment gateway for subscriptions
 
 ## API Endpoints
 
@@ -184,7 +134,7 @@ POST   /api/v1/auth/login         - Login user
 GET    /api/v1/auth/me            - Get current user
 ```
 
-### FlashLearn (Week 1 - Available Now)
+### FlashLearn
 ```
 GET    /api/v1/flashlearn/flashcards          - Get flashcards
 GET    /api/v1/flashlearn/flashcards/random   - Get random cards
@@ -193,17 +143,22 @@ GET    /api/v1/flashlearn/companies           - Get all companies
 POST   /api/v1/flashlearn/seed                - Seed database
 ```
 
-### ResumeAI (Week 2)
+### LearnAI
 ```
-POST   /api/v1/resumeai/upload       - Upload resume
-GET    /api/v1/resumeai/feedback     - Get feedback
+POST   /api/v1/learnai/explain    - Get concept explanation with analogies and examples
 ```
 
-### MockMate (Week 3)
+### ResumeAI
 ```
-POST   /api/v1/mockmate/start-interview  - Start interview
-POST   /api/v1/mockmate/answer           - Submit answer
-GET    /api/v1/mockmate/session/{id}     - Get session status
+POST   /api/v1/resumeai/upload       - Upload and analyze resume
+GET    /api/v1/resumeai/feedback     - Get resume feedback history
+```
+
+### MockMate
+```
+POST   /api/v1/mockmate/start-interview  - Start mock interview session
+POST   /api/v1/mockmate/answer           - Submit answer to interview question
+GET    /api/v1/mockmate/session/{id}     - Get interview session status
 ```
 
 ## Database Models
@@ -252,47 +207,35 @@ RAZORPAY_KEY_SECRET=your-secret
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ```
 
-## Testing Checklist
+## Documentation
 
-- [ ] Backend starts without errors
-- [ ] Frontend connects to backend
-- [ ] Registration works
-- [ ] Login works
-- [ ] FlashLearn loads flashcards
-- [ ] Card flipping works
-- [ ] Navigation between cards works
+- **Backend Docs**: See `backend/README.md`
+- **Frontend Docs**: See `frontend/README.md`
+- **API Documentation**: Available at `http://localhost:8000/docs`
+- **ReDoc Documentation**: Available at `http://localhost:8000/redoc`
 
-## Performance Targets
+## Architecture
 
-- API response time: < 200ms
-- Page load time: < 2s
-- Flashcard flip: < 100ms
-- Supporting 100 concurrent users
+PrepEdge AI is designed with a modern, scalable architecture:
 
-## Revenue Model
+- **Backend**: FastAPI microservices with modular structure
+- **Frontend**: Next.js with server-side rendering and static generation
+- **Database**: SQLite for development (easily migrate to PostgreSQL for production)
+- **Authentication**: JWT tokens with secure storage
+- **State Management**: Zustand for frontend state
+- **Styling**: Tailwind CSS for responsive design
 
-- **Free**: Limited to 5 flashcards/day
-- **Pro**: ₹499/month - Unlimited flashcards + 5 mock interviews
-- **Premium**: ₹999/month - Everything + resume analysis + priority support
+## License
 
-Target: ₹5,000/month by Month 2 (10+ paying users)
+This project is licensed under the MIT License. See LICENSE file for details.
 
-## Next Steps
+## Support
 
-1. **Run both servers** (see Quick Start above)
-2. **Test the FlashLearn module**
-3. **Create sample user account**
-4. **Verify API endpoints** at `http://localhost:8000/docs`
-5. **Plan Week 2 ResumeAI implementation**
-
-## Support & Documentation
-
-- Backend docs: `backend/README.md`
-- Frontend docs: `frontend/README.md`
-- API swagger: `http://localhost:8000/docs`
-- Architecture: See product document (.docx)
+For issues, questions, or contributions, please open an issue on GitHub.
 
 ---
+
+Built with ❤️ for Indian engineering students preparing for campus placements.
 
 **Built for**: Indian engineering students preparing for campus placements
 **Timeline**: 4 weeks to MVP
