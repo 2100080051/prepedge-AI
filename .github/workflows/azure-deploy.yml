@@ -1,0 +1,348 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AZURE_RESOURCE_GROUP: 'prepedge-ai-prod'
+  BACKEND_APP_NAME: 'prepedge-api'
+  FRONTEND_APP_NAME: 'prepedge-web'
+  REGISTRY_URL: 'prepedgeacr.azurecr.io'
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Backend Tests
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379/0
+          ENVIRONMENT: testing
+        run: |
+          pytest tests/ -v --cov=app --cov-report=xml
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage.xml
+          flags: backend
+
+  test-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Run Tests
+        working-directory: ./frontend
+        run: npm test -- --coverage
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./frontend/coverage/lcov.info
+          flags: frontend
+
+  build-backend:
+    needs: test-backend
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push Docker image (Backend)
+        working-directory: ./backend
+        run: |
+          az acr build \
+            --registry ${{ env.REGISTRY_URL }} \
+            --image prepedge-api:${{ github.sha }} \
+            --image prepedge-api:latest \
+            .
+
+  build-frontend:
+    needs: test-frontend
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push Docker image (Frontend)
+        working-directory: ./frontend
+        run: |
+          az acr build \
+            --registry ${{ env.REGISTRY_URL }} \
+            --image prepedge-web:${{ github.sha }} \
+            --image prepedge-web:latest \
+            .
+
+  deploy-backend:
+    needs: [test-backend, build-backend]
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Backend to App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.BACKEND_APP_NAME }}
+          package: ./backend
+          publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
+
+      - name: Run Database Migrations
+        run: |
+          az webapp ssh \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --command "alembic upgrade head"
+
+      - name: Verify Deployment
+        run: |
+          sleep 30
+          curl -f https://${{ env.BACKEND_APP_NAME }}.azurewebsites.net/api/v1/health || exit 1
+
+  deploy-frontend:
+    needs: [test-frontend, build-frontend]
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build Next.js
+        working-directory: ./frontend
+        env:
+          NEXT_PUBLIC_API_URL: https://api.prepedgeai.in/api/v1
+        run: npm run build
+
+      - name: Deploy Frontend to App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.FRONTEND_APP_NAME }}
+          package: ./frontend/.next
+          publish-profile: ${{ secrets.AZURE_FRONTEND_PUBLISH_PROFILE }}
+
+      - name: Verify Deployment
+        run: |
+          sleep 30
+          curl -f https://${{ env.FRONTEND_APP_NAME }}.azurewebsites.net || exit 1
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run SAST Scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Check for Secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+  rollback:
+    if: failure()
+    needs: [deploy-backend, deploy-frontend]
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Rollback Backend Deployment
+        run: |
+          az webapp deployment slot swap \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --slot staging
+
+      - name: Rollback Frontend Deployment
+        run: |
+          az webapp deployment slot swap \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.FRONTEND_APP_NAME }} \
+            --slot staging
+
+      - name: Notify Team
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "❌ PrepEdge AI Deployment Failed and Rolled Back",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deployment Status*: Failed and Rolled Back\n*Branch*: ${{ github.ref }}\n*Commit*: ${{ github.sha }}\n*Author*: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  notify-success:
+    if: success()
+    needs: [deploy-backend, deploy-frontend]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Notify Deployment Success
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "✅ PrepEdge AI Successfully Deployed to Azure",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deployment Status*: Success ✅\n*Environment*: Production\n*Branch*: ${{ github.ref }}\n*Commit*: ${{ github.sha }}\n*Author*: ${{ github.actor }}\n\n*URLs*:\n• API: https://api.prepedgeai.in/api/v1\n• Web: https://prepedgeai.in"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

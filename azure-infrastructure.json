@@ -1,0 +1,316 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Azure infrastructure for PrepEdge AI application"
+  },
+  "parameters": {
+    "environment": {
+      "type": "string",
+      "defaultValue": "prod",
+      "allowedValues": ["dev", "staging", "prod"],
+      "metadata": {
+        "description": "Environment name"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus",
+      "metadata": {
+        "description": "Azure region for resources"
+      }
+    },
+    "appServicePlanSku": {
+      "type": "string",
+      "defaultValue": "B2",
+      "allowedValues": ["B1", "B2", "B3", "S1", "S2", "S3"],
+      "metadata": {
+        "description": "App Service Plan SKU"
+      }
+    },
+    "databaseSku": {
+      "type": "string",
+      "defaultValue": "Standard_B2s",
+      "metadata": {
+        "description": "PostgreSQL Database SKU"
+      }
+    },
+    "redisSku": {
+      "type": "string",
+      "defaultValue": "Basic",
+      "allowedValues": ["Basic", "Standard", "Premium"],
+      "metadata": {
+        "description": "Redis Cache SKU"
+      }
+    },
+    "redisSize": {
+      "type": "string",
+      "defaultValue": "c0",
+      "allowedValues": ["c0", "c1", "c2", "c3"],
+      "metadata": {
+        "description": "Redis Cache size"
+      }
+    }
+  },
+  "variables": {
+    "projectName": "prepedge",
+    "uniqueSuffix": "[uniqueString(resourceGroup().id)]",
+    "backendAppName": "[concat(variables('projectName'), '-api-', parameters('environment'), '-', variables('uniqueSuffix'))]",
+    "frontendAppName": "[concat(variables('projectName'), '-web-', parameters('environment'), '-', variables('uniqueSuffix'))]",
+    "appServicePlanName": "[concat(variables('projectName'), '-plan-', parameters('environment'))]",
+    "postgresServerName": "[concat(variables('projectName'), '-db-', parameters('environment'), '-', variables('uniqueSuffix'))]",
+    "redisCacheName": "[concat(variables('projectName'), '-cache-', parameters('environment'), '-', variables('uniqueSuffix'))]",
+    "keyVaultName": "[concat(variables('projectName'), '-kv-', variables('uniqueSuffix'))]",
+    "storageAccountName": "[concat(variables('projectName'), parameters('environment'), variables('uniqueSuffix'))]",
+    "appInsightsName": "[concat(variables('projectName'), '-insights-', parameters('environment'))]",
+    "logAnalyticsName": "[concat(variables('projectName'), '-logs-', parameters('environment'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('appServicePlanName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('appServicePlanSku')]"
+      },
+      "kind": "linux",
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('backendAppName')]",
+      "location": "[parameters('location')]",
+      "kind": "app,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "siteConfig": {
+          "linuxFxVersion": "PYTHON|3.11",
+          "alwaysOn": true,
+          "http20Enabled": true,
+          "appSettings": [
+            {
+              "name": "WEBSITES_PORT",
+              "value": "8000"
+            },
+            {
+              "name": "ENVIRONMENT",
+              "value": "[parameters('environment')]"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName'))).InstrumentationKey]"
+            },
+            {
+              "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
+              "value": "~3"
+            },
+            {
+              "name": "XDT_MicrosoftApplicationInsights_Mode",
+              "value": "recommended"
+            }
+          ],
+          "connectionStrings": [
+            {
+              "name": "DefaultConnection",
+              "connectionString": "[concat('postgresql://prepedge:', reference(resourceId('Microsoft.DBforPostgreSQL/servers', variables('postgresServerName'))).fullyQualifiedDomainName)]",
+              "type": "PostgreSQL"
+            }
+          ]
+        },
+        "httpsOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('frontendAppName')]",
+      "location": "[parameters('location')]",
+      "kind": "app,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "siteConfig": {
+          "linuxFxVersion": "NODE|18-lts",
+          "alwaysOn": true,
+          "http20Enabled": true,
+          "appSettings": [
+            {
+              "name": "NEXT_TELEMETRY_DISABLED",
+              "value": "1"
+            },
+            {
+              "name": "NODE_ENV",
+              "value": "production"
+            },
+            {
+              "name": "NEXT_PUBLIC_API_URL",
+              "value": "[concat('https://', variables('backendAppName'), '.azurewebsites.net/api/v1')]"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName'))).InstrumentationKey]"
+            }
+          ]
+        },
+        "httpsOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/servers",
+      "apiVersion": "2017-12-01",
+      "name": "[variables('postgresServerName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('databaseSku')]"
+      },
+      "properties": {
+        "createMode": "Default",
+        "version": "11",
+        "administratorLogin": "adminuser",
+        "administratorLoginPassword": "[concat(uniqueString(resourceGroup().id), 'P@ssw0rd!')]",
+        "storageProfile": {
+          "storageMB": 51200,
+          "backupRetentionDays": 7,
+          "geoRedundantBackup": "Enabled"
+        },
+        "sslEnforcement": "ENABLED"
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/servers/databases",
+      "apiVersion": "2017-12-01",
+      "name": "[concat(variables('postgresServerName'), '/prepedge')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/servers', variables('postgresServerName'))]"
+      ],
+      "properties": {
+        "charset": "UTF8",
+        "collation": "en_US.utf8"
+      }
+    },
+    {
+      "type": "Microsoft.DBforPostgreSQL/servers/firewallRules",
+      "apiVersion": "2017-12-01",
+      "name": "[concat(variables('postgresServerName'), '/AllowAzureServices')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/servers', variables('postgresServerName'))]"
+      ],
+      "properties": {
+        "startIpAddress": "0.0.0.0",
+        "endIpAddress": "0.0.0.0"
+      }
+    },
+    {
+      "type": "Microsoft.Cache/redis",
+      "apiVersion": "2022-06-01",
+      "name": "[variables('redisCacheName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "name": "[parameters('redisSku')]",
+          "family": "C",
+          "capacity": "[variables('redisCapacity')]"
+        },
+        "enableNonSslPort": false,
+        "minimumTlsVersion": "1.2",
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2022-07-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "enabledForDeployment": true,
+        "enabledForTemplateDeployment": true,
+        "enabledForDiskEncryption": false,
+        "tenantId": "[subscription().tenantId]",
+        "sku": {
+          "name": "standard",
+          "family": "A"
+        },
+        "accessPolicies": []
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "accessTier": "Hot",
+        "minimumTlsVersion": "TLS1_2",
+        "supportsHttpsTrafficOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2021-12-01-preview",
+      "name": "[variables('logAnalyticsName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 30
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ],
+      "properties": {
+        "Application_Type": "web",
+        "RetentionInDays": 30,
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+        "publicNetworkAccessForIngestion": "Enabled",
+        "publicNetworkAccessForQuery": "Enabled"
+      }
+    }
+  ],
+  "outputs": {
+    "backendAppUrl": {
+      "type": "string",
+      "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('backendAppName'))).defaultHostName)]"
+    },
+    "frontendAppUrl": {
+      "type": "string",
+      "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('frontendAppName'))).defaultHostName)]"
+    },
+    "postgresServerName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.DBforPostgreSQL/servers', variables('postgresServerName'))).fullyQualifiedDomainName]"
+    },
+    "redisCacheHostName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Cache/redis', variables('redisCacheName'))).hostName]"
+    }
+  }
+}
