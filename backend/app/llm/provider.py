@@ -24,7 +24,7 @@ class LLMConfig:
     """Configuration for LLM providers"""
     
     # Nvidia configuration (free cloud API)
-    NVIDIA_API_KEY = os.getenv("OPENAI_API_KEY", "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")
+    NVIDIA_API_KEY = os.getenv("OPENAI_API_KEY", "")
     NVIDIA_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://integrate.api.nvidia.com/v1")
     NVIDIA_MODELS = {
         "pdf_summarizer": "meta/llama-3.1-8b-instruct",      # Fast summarization
@@ -32,8 +32,9 @@ class LLMConfig:
         "default": "meta/llama-3.1-8b-instruct"
     }
     
-    # OpenRouter configuration (free tier)
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
+    # OpenRouter configuration (2 keys for load balancing/failover)
+    OPENROUTER_API_KEY_1 = os.getenv("OPENROUTER_API_KEY_1", "")
+    OPENROUTER_API_KEY_2 = os.getenv("OPENROUTER_API_KEY_2", "")
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     OPENROUTER_MODELS = {
         "learnai_concept": "openai/gpt-3.5-turbo",
@@ -41,8 +42,9 @@ class LLMConfig:
         "default": "openai/gpt-3.5-turbo"
     }
     
-    # Groq configuration (free tier, very fast)
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    # Groq configuration (2 keys for load balancing/failover, very fast)
+    GROQ_API_KEY_1 = os.getenv("GROQ_API_KEY_1", "")
+    GROQ_API_KEY_2 = os.getenv("GROQ_API_KEY_2", "")
     GROQ_BASE_URL = "https://api.groq.com/openai/v1"
     GROQ_MODELS = {
         "resumeai_analysis": "llama-3.3-70b-versatile",
@@ -126,14 +128,22 @@ class NvidiaClient:
 
 
 class OpenRouterClient:
-    """Client for OpenRouter API"""
+    """Client for OpenRouter API with dual-key fallback"""
     
     def __init__(self):
-        self.api_key = LLMConfig.OPENROUTER_API_KEY
+        # Use first key if available, fallback to second
+        self.api_key = LLMConfig.OPENROUTER_API_KEY_1 or LLMConfig.OPENROUTER_API_KEY_2
+        self.api_key_backup = LLMConfig.OPENROUTER_API_KEY_2 if self.api_key == LLMConfig.OPENROUTER_API_KEY_1 else LLMConfig.OPENROUTER_API_KEY_1
         self.base_url = LLMConfig.OPENROUTER_BASE_URL
+        self.current_key_index = 0  # 0 for primary, 1 for backup
+        self._init_client()
+    
+    def _init_client(self):
+        """Initialize HTTP client with current API key"""
+        current_key = self.api_key if self.current_key_index == 0 else self.api_key_backup
         self.client = httpx.AsyncClient(
             headers={
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {current_key}",
                 "HTTP-Referer": "https://prepedge.ai",
                 "X-Title": "PrepEdge AI"
             },
@@ -195,14 +205,22 @@ class OpenRouterClient:
 
 
 class GroqClient:
-    """Client for Groq API"""
+    """Client for Groq API with dual-key fallback"""
     
     def __init__(self):
-        self.api_key = LLMConfig.GROQ_API_KEY
+        # Use first key if available, fallback to second
+        self.api_key = LLMConfig.GROQ_API_KEY_1 or LLMConfig.GROQ_API_KEY_2
+        self.api_key_backup = LLMConfig.GROQ_API_KEY_2 if self.api_key == LLMConfig.GROQ_API_KEY_1 else LLMConfig.GROQ_API_KEY_1
         self.base_url = LLMConfig.GROQ_BASE_URL
+        self.current_key_index = 0  # 0 for primary, 1 for backup
+        self._init_client()
+    
+    def _init_client(self):
+        """Initialize HTTP client with current API key"""
+        current_key = self.api_key if self.current_key_index == 0 else self.api_key_backup
         self.client = httpx.AsyncClient(
             headers={
-                "Authorization": f"Bearer {self.api_key}"
+                "Authorization": f"Bearer {current_key}"
             },
             timeout=LLMConfig.REQUEST_TIMEOUT
         )
