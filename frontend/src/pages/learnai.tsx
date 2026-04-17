@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
-import { Sparkles, Brain, BookOpen, AlertCircle, Image as ImageIcon, Loader2, FileText, UploadCloud, Star, Target, GraduationCap, CheckCircle2, X } from 'lucide-react';
+import { Sparkles, Brain, BookOpen, AlertCircle, Image as ImageIcon, Loader2, FileText, UploadCloud, Star, Target, GraduationCap, CheckCircle2, X, Copy, Check } from 'lucide-react';
 import { learnAiApi } from '@/lib/api';
 
 export default function LearnAI() {
@@ -18,6 +18,7 @@ export default function LearnAI() {
   const [loading, setLoading] = useState(false);
   const [lesson, setLesson] = useState<any>(null);
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
 
   // ── PDF Summarizer State ───────────
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -52,8 +53,8 @@ export default function LearnAI() {
   const currentDomainInfo = domains.find(d => d.domain === selectedDomain);
   const subjects = currentDomainInfo ? currentDomainInfo.subjects : [];
 
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGenerate = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!selectedDomain || !selectedSubject || !concept.trim()) {
       setError('Please fill in all required fields.');
       return;
@@ -62,15 +63,46 @@ export default function LearnAI() {
     setError('');
     setLoading(true);
     setLesson(null);
+    setCopied(false);
 
-    try {
-      const res = await learnAiApi.explainAndVisualize(selectedDomain, selectedSubject, concept, language);
-      setLesson(res.data);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to generate lesson. Please try again.');
-    } finally {
-      setLoading(false);
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+      try {
+        const res = await learnAiApi.explainAndVisualize(selectedDomain, selectedSubject, concept, language);
+        
+        // Validate response - check for empty explanation
+        if (!res.data) {
+          throw new Error('No data received from AI. Please try again.');
+        }
+        
+        if (!res.data.explanation || res.data.explanation.trim().length < 10) {
+          throw new Error('Received an empty or incomplete response from the AI.');
+        }
+        
+        setLesson(res.data);
+        break; // Success
+      } catch (err: any) {
+        attempts++;
+        
+        // Handle specific error types
+        if (err.response?.status === 429) {
+          setError('API rate limit reached. Please wait a moment and try again.');
+        } else if (err.response?.status === 500 || err.response?.status === 502 || err.response?.status === 503) {
+          setError('AI service temporarily unavailable. Retrying...');
+        } else if (attempts >= maxAttempts) {
+          setError(err.response?.data?.detail || err.message || 'Failed to generate lesson. Please try again or check your internet connection.');
+        }
+        
+        // Retry with exponential backoff
+        if (attempts < maxAttempts) {
+          const delayMs = 1000 * Math.pow(2, attempts - 1); // 1s, 2s, 4s
+          await new Promise(resolve => setTimeout(resolve, Math.min(delayMs, 5000)));
+        }
+      }
     }
+    setLoading(false);
   };
 
   const handlePdfSummarize = async () => {
@@ -78,11 +110,28 @@ export default function LearnAI() {
     setPdfLoading(true);
     setPdfError('');
     setPdfSummary(null);
+    
     try {
       const res = await learnAiApi.summarizePdf(pdfFile);
+      
+      // Validate PDF summary response
+      if (!res.data || !res.data.title) {
+        throw new Error('Failed to process PDF. Please ensure it is a valid PDF file.');
+      }
+      
       setPdfSummary(res.data);
     } catch (err: any) {
-      setPdfError(err.response?.data?.detail || 'Failed to process PDF. Please try again.');
+      // Handle specific error types
+      if (err.response?.status === 413 || err.message?.includes('too large')) {
+        setPdfError('File size too large. Maximum PDF size is 25MB.');
+      } else if (err.response?.status === 415 || err.message?.includes('format')) {
+        setPdfError('Invalid file format. Please upload a valid PDF file.');
+      } else if (err.response?.status === 429) {
+        setPdfError('Too many requests. Please wait a moment and try again.');
+      } else {
+        setPdfError(err.response?.data?.detail || 'Failed to process PDF. Please try again.');
+      }
+      console.error('PDF summarization error:', err);
     } finally {
       setPdfLoading(false);
     }
@@ -210,9 +259,18 @@ export default function LearnAI() {
                   </div>
 
                   {error && (
-                    <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                      <span>{error}</span>
+                    <div className="p-4 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 flex items-center justify-between">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <span>{error}</span>
+                      </div>
+                      <button
+                        onClick={handleGenerate}
+                        disabled={loading}
+                        className="ml-4 px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded font-semibold text-xs transition-colors disabled:opacity-50"
+                      >
+                        Retry
+                      </button>
                     </div>
                   )}
 
@@ -266,12 +324,25 @@ export default function LearnAI() {
                   <div className="glass-card p-8 rounded-2xl border border-slate-200/60 shadow-sm relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-indigo-100 to-transparent opacity-50 rounded-bl-[100px]" />
                     <div className="relative z-10">
-                      <div className="flex items-center gap-3 mb-4">
-                        <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold uppercase tracking-wider">
-                          {lesson.domain}
-                        </span>
-                        <span className="text-slate-400">•</span>
-                        <span className="text-slate-600 font-medium">{lesson.subject}</span>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold uppercase tracking-wider">
+                            {lesson.domain}
+                          </span>
+                          <span className="text-slate-400">•</span>
+                          <span className="text-slate-600 font-medium">{lesson.subject}</span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${lesson.concept}\n\n${lesson.explanation}`);
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 2000);
+                          }}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors text-sm font-semibold"
+                        >
+                          {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                          {copied ? 'Copied!' : 'Copy'}
+                        </button>
                       </div>
                       <h2 className="text-3xl md:text-5xl font-heading font-extrabold text-slate-900 mb-6">
                         {lesson.concept}
@@ -381,7 +452,7 @@ export default function LearnAI() {
                     {pdfFile ? (<div><p className="font-semibold text-slate-800 text-sm">{pdfFile.name}</p><p className="text-xs text-slate-500 mt-1">{(pdfFile.size/1024/1024).toFixed(2)} MB</p><button onClick={(e) => {e.stopPropagation(); setPdfFile(null);}} className="text-xs text-red-500 hover:text-red-600 font-medium mt-2">Remove</button></div>)
                       : (<p className="text-sm text-slate-500">Click to select PDF or drag &amp; drop</p>)}
                   </div>
-                  {pdfError && (<div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>{pdfError}</span></div>)}
+                  {pdfError && (<div className="mb-4 p-4 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 flex items-center justify-between"><div className="flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>{pdfError}</span></div><button onClick={handlePdfSummarize} disabled={!pdfFile || pdfLoading} className="ml-4 px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded font-semibold text-xs transition-colors disabled:opacity-50">Retry</button></div>)}
                   <button onClick={handlePdfSummarize} disabled={!pdfFile || pdfLoading}
                     className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold rounded-xl disabled:opacity-50 transition-all flex items-center justify-center gap-2">
                     {pdfLoading ? (<><Loader2 className="w-5 h-5 animate-spin" />Analyzing PDF...</>) : (<><Sparkles className="w-5 h-5" />Generate Exam Notes</>)}

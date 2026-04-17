@@ -17,12 +17,12 @@ class AnswerRequest(BaseModel):
     message: str
 
 @router.post("/start-interview")
-def start_interview(
+async def start_interview(
     req: StartInterviewRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Start an AI mock interview session powered by Nvidia Llama"""
+    """Start an AI mock interview session with Groq-powered questions"""
     valid_companies = ["TCS", "Infosys", "Wipro", "Accenture", "Cognizant"]
     if req.company not in valid_companies:
         raise HTTPException(
@@ -31,7 +31,7 @@ def start_interview(
         )
 
     try:
-        session, opening_message = MockMateService.start_interview_session(
+        session, opening_message = await MockMateService.start_interview_session(
             user_id=current_user.id,
             company=req.company,
             role=req.role,
@@ -49,14 +49,14 @@ def start_interview(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/answer")
-def submit_answer(
+async def submit_answer(
     req: AnswerRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Submit an answer during mock interview and get AI response"""
     try:
-        result = MockMateService.process_answer(
+        result = await MockMateService.process_answer(
             session_id=req.session_id,
             user_answer=req.message,
             db=db

@@ -25,9 +25,9 @@ export default function Layout({ children }: LayoutProps) {
   }, [token, user, setUser, logout]);
 
   return (
-    <div className="min-h-screen flex flex-col font-sans text-slate-900 bg-slate-50 overflow-x-hidden selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-screen flex flex-col font-sans text-slate-900 bg-slate-50 overflow-x-hidden">
       <Navbar />
-      <main className="flex-grow pt-16">
+      <main className="flex-grow pt-16 animate-fade-in">
         {children}
       </main>
       <Footer />

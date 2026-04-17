@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from app.modules.learnai.schemas import ConceptExplainRequest
 from app.modules.learnai.service import LearnAIService
+from app.llm.provider import get_llm_router
 from app.config import settings
 import io
 
@@ -24,19 +25,20 @@ def get_languages():
     ]
 
 @router.post("/explain")
-def explain_concept(req: ConceptExplainRequest):
+async def explain_concept(req: ConceptExplainRequest):
     """
     Generate a full AI lesson for a given concept.
     - Domain → Subject → Concept
     - Language: English / Telugu / Hindi / Tamil / Kannada / Malayalam
     - Returns structured explanation with analogy, example, key points, mistakes
+    - Powered by OpenRouter (Mistral 7B + Llama 70B) for precise explanations
     """
     if not req.concept.strip():
         raise HTTPException(status_code=400, detail="Concept cannot be empty")
     if len(req.concept) > 200:
         raise HTTPException(status_code=400, detail="Concept too long (max 200 chars)")
 
-    result = LearnAIService.explain_concept(
+    result = await LearnAIService.explain_concept(
         domain=req.domain,
         subject=req.subject,
         concept=req.concept,
@@ -59,7 +61,7 @@ def visualize_concept(req: ConceptExplainRequest):
     return {"image_base64": image_b64, "concept": req.concept}
 
 @router.post("/explain-and-visualize")
-def explain_and_visualize(req: ConceptExplainRequest):
+async def explain_and_visualize(req: ConceptExplainRequest):
     """
     Combined endpoint: explain concept + generate image in one call.
     Image generation is async-friendly — included when available, omitted otherwise.
@@ -67,8 +69,8 @@ def explain_and_visualize(req: ConceptExplainRequest):
     if not req.concept.strip():
         raise HTTPException(status_code=400, detail="Concept cannot be empty")
 
-    # Get AI explanation
-    explanation = LearnAIService.explain_concept(
+    # Get AI explanation (now async)
+    explanation = await LearnAIService.explain_concept(
         domain=req.domain,
         subject=req.subject,
         concept=req.concept,
@@ -87,6 +89,7 @@ def explain_and_visualize(req: ConceptExplainRequest):
 async def summarize_pdf(file: UploadFile = File(...)):
     """
     Upload a PDF study material and get AI-generated structured exam notes.
+    Uses multi-provider LLM (Nvidia → OpenRouter → Groq fallback)
     Returns: key_topics, chapter_summaries, exam_tips, quick_revision_points
     """
     if not file.filename.endswith('.pdf'):
@@ -119,54 +122,15 @@ async def summarize_pdf(file: UploadFile = File(...)):
         if len(full_text) > 8000:
             truncated_text += "\n\n[Note: Document was truncated for processing. Showing first 8000 characters.]"
 
-        prompt = f"""You are an expert academic summarizer helping a student prepare for exams.
-
-The following is extracted text from a PDF study material:
-
-{truncated_text}
-
-Generate a comprehensive, structured exam summary. Return ONLY valid JSON:
-{{
-  "title": "Inferred title or subject of this document",
-  "total_pages_processed": {max_pages},
-  "key_topics": ["List of 5-10 main topics covered in this document"],
-  "chapter_summaries": [
-    {{
-      "chapter": "Chapter/Section name or number",
-      "summary": "2-3 sentence summary of key points in this section"
-    }}
-  ],
-  "important_definitions": [
-    {{"term": "Technical term", "definition": "Clear definition in simple English"}}
-  ],
-  "exam_tips": ["5-7 things the student MUST know for exams from this material"],
-  "quick_revision_points": ["10-15 single-line quick revision bullet points for last-minute study"],
-  "formula_or_concepts": ["Any formulas, algorithms, or core concepts to memorize verbatim"]
-}}"""
-
-        client = get_nvidia_client()
-        resp = client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": "You are an expert exam tutor. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=2048
-        )
-        raw = resp.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```", 2)[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0]
-
-        import json
-        result = json.loads(raw.strip())
+        # Get LLM router and generate summary using multi-provider fallback
+        llm_router = get_llm_router()
+        result = await llm_router.generate_pdf_summary(truncated_text)
         result["filename"] = file.filename
+        result["total_pages_processed"] = max_pages
         return result
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to summarize PDF: {str(e)[:200]}")
+

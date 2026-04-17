@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle, AlertCircle, TrendingUp, Clock, Eye } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { mockMateApi } from '@/lib/api';
+import apiClient from '@/lib/api';
 
 interface ProctoringReportProps {
   sessionId: number;
@@ -34,7 +34,7 @@ export default function ProctoringReportModal({ sessionId, onClose }: Proctoring
   useEffect(() => {
     const fetchReport = async () => {
       try {
-        const response = await mockMateApi.get(`/proctoring/report/${sessionId}/details`);
+        const response = await apiClient.get(`/proctoring/report/${sessionId}/details`);
         setReport(response.data);
       } catch (err: any) {
         setError(err.response?.data?.detail || 'Failed to load report');

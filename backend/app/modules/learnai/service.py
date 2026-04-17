@@ -1,9 +1,11 @@
 """
 LearnAI Service — AI-powered concept explanation in any subject, any domain.
-Implementation planned for future integration with LLM APIs.
+Powered by OpenRouter for powerful, precise concept explanations.
 """
 
-from typing import Optional
+from typing import Optional, Dict
+import asyncio
+from app.llm.provider import get_llm_router
 
 
 # ─── Domain & Subject Catalog ────────────────────────────────────────────────
@@ -103,31 +105,53 @@ class LearnAIService:
         return result
 
     @staticmethod
-    def explain_concept(domain: str, subject: str, concept: str, language: str = "English") -> dict:
-        """Generate a lesson on the given concept"""
-        # Returns structured response - real AI integration coming Week 2+
-        return {
-            "domain": domain,
-            "subject": subject,
-            "concept": concept,
-            "language": language,
-            "explanation": f"Let me explain {concept} to you in the simplest way possible!\n\n{concept} is a fundamental concept in {subject}. It helps you understand how {subject} works in practice. By learning this concept, you'll be able to solve complex problems and apply your knowledge in real-world scenarios.\n\nThis concept forms the foundation for many advanced topics in {subject}, making it essential for your learning journey.",
-            "analogy": f"Think of {concept} like a real-world scenario: Imagine {concept} works like a practical system you interact with daily. Just as you understand how something works through everyday experience, {concept} follows similar logical principles that make it easy to grasp.",
-            "example": f"Here's a step-by-step example of {concept}:\n\n1. First, understand the basic definition of {concept}\n2. Then, see how {concept} applies to simple cases\n3. Finally, apply {concept} to more complex scenarios\n4. Practice with variations to master the concept\n\nThis approach helps you build a strong foundation in {concept}.",
-            "key_points": [
-                f"{concept} is essential for {subject}",
-                f"Understanding {concept} helps solve practical problems",
-                f"Mastering {concept} opens doors to advanced topics",
-                f"{concept} has real-world applications in many fields",
-                f"Practice is key to truly understanding {concept}"
-            ],
-            "common_mistakes": [
-                f"People often confuse {concept} with similar concepts",
-                f"A common mistake is not understanding the underlying principle of {concept}",
-                f"Learners sometimes skip the fundamentals of {concept}"
-            ],
-            "image_prompt": f"Clean educational diagram explaining {concept} in {subject}. Visual breakdown with labeled parts showing how {concept} works. Professional textbook quality illustration."
-        }
+    async def explain_concept(domain: str, subject: str, concept: str, language: str = "English") -> dict:
+        """Generate a powerful lesson on the given concept using OpenRouter"""
+        try:
+            # Get the LLM router instance
+            llm_router = get_llm_router()
+            
+            # Generate concept explanation using OpenRouter (Mistral 7B + Llama 70B)
+            explanation_data = await llm_router.generate_learnai_concept(
+                domain=domain,
+                subject=subject,
+                concept=concept,
+                language=language
+            )
+            
+            # Ensure all required fields are present
+            result = {
+                "domain": domain,
+                "subject": subject,
+                "concept": concept,
+                "language": language,
+                "explanation": explanation_data.get("explanation", ""),
+                "analogy": explanation_data.get("analogy", ""),
+                "example": explanation_data.get("example", ""),
+                "key_points": explanation_data.get("key_points", []),
+                "common_mistakes": explanation_data.get("common_mistakes", []),
+                "interview_tips": explanation_data.get("interview_tips", ""),
+                "image_prompt": f"Clean educational diagram explaining {concept} in {subject}. Visual breakdown with labeled parts showing how {concept} works. Professional textbook quality illustration."
+            }
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error generating concept explanation: {e}")
+            # Fallback to basic explanation
+            return {
+                "domain": domain,
+                "subject": subject,
+                "concept": concept,
+                "language": language,
+                "explanation": f"Unable to generate full explanation. {concept} is a key concept in {subject}.",
+                "analogy": "Check the full explanation above",
+                "example": "Check the full explanation above",
+                "key_points": [f"{concept} is important in {subject}"],
+                "common_mistakes": ["Not enough practice"],
+                "interview_tips": "Prepare examples related to this concept",
+                "image_prompt": f"Clean educational diagram explaining {concept} in {subject}. Visual breakdown with labeled parts showing how {concept} works. Professional textbook quality illustration."
+            }
 
     @staticmethod
     def generate_concept_image(concept: str, subject: str) -> Optional[str]:

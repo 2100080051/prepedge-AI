@@ -11,6 +11,38 @@ import { useAuthStore } from '@/store/auth';
 import ProctoringMonitor from '@/components/ProctoringMonitor';
 import ProctoringReportModal from '@/components/ProctoringReportModal';
 
+// Helper: clean up raw AI response that may be JSON-encoded
+function parseAIMessage(raw: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  // Detect if the response is a JSON string or wrapped in code fences
+  let jsonCandidate = trimmed;
+  // Strip markdown code fences  ```json ... ```
+  if (jsonCandidate.startsWith('```')) {
+    jsonCandidate = jsonCandidate.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  }
+  try {
+    const parsed = JSON.parse(jsonCandidate);
+    if (typeof parsed === 'object' && parsed !== null) {
+      // Extract the question text from a structured JSON response
+      const question = parsed.question || parsed.text || parsed.content || parsed.message;
+      if (question) {
+        let result = question;
+        // Optionally append hints
+        if (Array.isArray(parsed.hints) && parsed.hints.length) {
+          result += '\n\n💡 Hints:\n' + parsed.hints.map((h: string, i: number) => `${i + 1}. ${h}`).join('\n');
+        }
+        return result;
+      }
+      // If no known key, stringify nicely
+      return question || JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    // Not JSON — return as-is
+  }
+  return raw;
+}
+
 type Message = {
   role: 'assistant' | 'user';
   content: string;
@@ -83,16 +115,30 @@ export default function MockMate() {
     setLoading(true);
     try {
       const res = await mockMateApi.startInterview(company, role);
+      
+      // Validate response
+      if (!res.data || !res.data.session_id) {
+        throw new Error('Failed to initialize interview session.');
+      }
+      
       setSessionId(res.data.session_id);
       // Backend returns 'first_message' key for the opening question
-      const openingMsg = res.data.first_message || res.data.response || res.data.message || 'Hello! I am your AI interviewer. Let us begin.';
-      setMessages([{ role: 'assistant', content: openingMsg }]);
+      const rawMsg = res.data.first_message || res.data.response || res.data.message || 'Hello! I am your AI interviewer. Let us begin.';
+      setMessages([{ role: 'assistant', content: parseAIMessage(rawMsg) }]);
       setSessionActive(true);
       
       // Start proctoring for this session
       setShowProctoringMonitor(true);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to start session. Please ensure you are logged in.');
+      // Specific error handling
+      if (err.response?.status === 429) {
+        alert('Too many requests. Please wait a moment and try again.');
+      } else if (err.response?.status === 503) {
+        alert('AI service is temporarily unavailable. Please try again in a moment.');
+      } else {
+        alert(err.response?.data?.detail || err.message || 'Failed to start interview. Please ensure you are logged in.');
+      }
+      console.error('Interview start error:', err);
     } finally {
       setLoading(false);
     }
@@ -109,17 +155,39 @@ export default function MockMate() {
 
     try {
       const res = await mockMateApi.submitAnswer(sessionId, userMsg);
+      
+      // Validate response
+      if (!res.data) {
+        throw new Error('No response received from AI interviewer.');
+      }
+      
       const data = res.data;
+      
+      // Validate response content
+      if (!data.response || data.response.trim().length === 0) {
+        throw new Error('Received empty response from interviewer.');
+      }
 
       setLastCoaching(data.coaching);
-      
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: parseAIMessage(data.response) }]);
 
       if (data.is_complete && data.final_report) {
         setFinalReport(data.final_report);
       }
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I had trouble processing that. Could you try answering again?" }]);
+    } catch (err: any) {
+      // Enhanced error handling
+      let errorMsg = "Sorry, I had trouble processing that. Could you try answering again?";
+      
+      if (err.response?.status === 429) {
+        errorMsg = "Rate limited. Please wait a moment before continuing.";
+      } else if (err.response?.status === 503) {
+        errorMsg = "AI service temporarily unavailable. Please retry your answer.";
+      } else if (err.message?.includes('empty')) {
+        errorMsg = "Couldn't understand that response. Please provide more details.";
+      }
+      
+      setMessages(prev => [...prev, { role: 'assistant', content: errorMsg }]);
+      console.error('Message submission error:', err);
     } finally {
       setLoading(false);
     }
@@ -456,7 +524,25 @@ export default function MockMate() {
           </div>
           
         </div>
+
+        {/* Proctoring Monitor floating widget */}
+        {sessionActive && showProctoringMonitor && sessionId && !finalReport && (
+          <ProctoringMonitor
+            sessionId={sessionId}
+            isActive={sessionActive && !finalReport}
+            onFlagSession={handleFlagSession}
+          />
+        )}
+
       </div>
+
+      {/* Proctoring Report Modal */}
+      {showProctoringReport && sessionId && (
+        <ProctoringReportModal
+          sessionId={sessionId}
+          onClose={() => setShowProctoringReport(false)}
+        />
+      )}
     </>
   );
 }

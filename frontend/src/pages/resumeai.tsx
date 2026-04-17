@@ -12,41 +12,128 @@ export default function ResumeAI() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [report, setReport] = useState<any>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      // Validate file type
+      if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
+        setError('Invalid file format. Please upload a valid .pdf file.');
+        return;
+      }
+      
+      // Validate file size (5MB max)
+      const maxSizeMB = 5;
+      const fileSizeMB = selectedFile.size / (1024 * 1024);
+      if (fileSizeMB > maxSizeMB) {
+        setError(`File size too large. Maximum size is ${maxSizeMB}MB. Your file is ${fileSizeMB.toFixed(2)}MB.`);
+        return;
+      }
+      
+      // Validate file size minimum (should have some content)
+      if (selectedFile.size < 5000) {
+        setError('File appears to be empty or corrupted. Please upload a valid resume PDF.');
+        return;
+      }
+      
+      setFile(selectedFile);
       setError('');
     }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setFile(e.dataTransfer.files[0]);
+    setIsDragging(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) {
+      // Validate file type
+      if (droppedFile.type !== 'application/pdf' && !droppedFile.name.toLowerCase().endsWith('.pdf')) {
+        setError('Invalid file format. Please upload a valid .pdf file.');
+        return;
+      }
+      
+      // Validate file size (5MB max)
+      const maxSizeMB = 5;
+      const fileSizeMB = droppedFile.size / (1024 * 1024);
+      if (fileSizeMB > maxSizeMB) {
+        setError(`File size too large. Maximum size is ${maxSizeMB}MB. Your file is ${fileSizeMB.toFixed(2)}MB.`);
+        return;
+      }
+      
+      setFile(droppedFile);
       setError('');
     }
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file) {
+      setError('Please select a file to upload before proceeding.');
+      return;
+    }
     
     setLoading(true);
+    setUploadProgress(0);
     setError('');
     setReport(null);
 
+    const interval = setInterval(() => {
+        setUploadProgress(prev => {
+            if (prev >= 90) return prev;
+            return prev + Math.floor(Math.random() * 10) + 5;
+        });
+    }, 500);
+
     try {
       const res = await resumeAiApi.uploadResume(file);
+      clearInterval(interval);
+      setUploadProgress(100);
+      
+      // Validate response
+      if (!res.data) {
+        throw new Error('Received an invalid response from the server.');
+      }
+      
+      if (!res.data.detected_domain) {
+        throw new Error('Could not analyze resume. Please ensure it contains readable text.');
+      }
+      
       setReport(res.data);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to analyze resume. Please try again.');
+      clearInterval(interval);
+      
+      // Handle specific error types
+      if (err.response?.status === 413 || err.message?.includes('too large')) {
+        setError('File size too large. Please use a smaller PDF file (max 5MB).');
+      } else if (err.response?.status === 415 || err.message?.includes('format')) {
+        setError('Invalid file format. Please ensure you are uploading a valid PDF file.');
+      } else if (err.response?.status === 422 || err.message?.includes('text')) {
+        setError('Could not read PDF. Please ensure the PDF contains extracted text (not a scanned image).');
+      } else if (err.response?.status === 429) {
+        setError('Too many requests. Please wait a moment and try again.');
+      } else {
+        setError(err.response?.data?.detail || err.message || 'Failed to analyze resume. Please try again.');
+      }
+      
+      // Log error for debugging
+      console.error('Resume upload error:', err);
     } finally {
-      setLoading(false);
+      setTimeout(() => {
+          setLoading(false);
+          setUploadProgress(0);
+      }, 500);
     }
   };
 
@@ -84,18 +171,20 @@ export default function ResumeAI() {
                 </h2>
 
                 <div 
-                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${
+                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 ${
+                    isDragging ? 'border-indigo-500 bg-indigo-100 scale-105' :
                     file ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-300 hover:border-indigo-400 bg-white'
                   }`}
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
                 >
                   <input 
                     type="file" 
                     className="hidden" 
                     ref={fileInputRef}
                     onChange={handleFileChange}
-                    accept=".pdf,.doc,.docx,.txt"
+                    accept=".pdf"
                   />
                   
                   <div className="flex flex-col items-center gap-3">
@@ -121,16 +210,44 @@ export default function ResumeAI() {
                           </button>
                           or drag and drop
                         </p>
-                        <p className="text-xs text-slate-400">PDF, DOCX, TXT up to 5MB</p>
+                        <p className="text-xs text-slate-400">PDFs only, up to 5MB</p>
                       </div>
                     )}
                   </div>
                 </div>
 
                 {error && (
-                  <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <span>{error}</span>
+                  <div className="mt-4 p-4 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <span>{error}</span>
+                      </div>
+                      {file && (
+                        <button 
+                          onClick={handleUpload}
+                          disabled={loading}
+                          className="ml-4 px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded font-semibold text-xs transition-colors disabled:opacity-50 flex-shrink-0"
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {loading && uploadProgress > 0 && (
+                  <div className="mt-6 space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-slate-700">Analyzing Resume</span>
+                      <span className="text-indigo-600 font-bold">{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
                   </div>
                 )}
 
@@ -162,8 +279,12 @@ export default function ResumeAI() {
                     <div className="absolute inset-0 border-4 border-indigo-100 rounded-full"></div>
                     <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
                   </div>
-                  <h3 className="text-xl font-bold text-slate-900 mb-2">Reading your resume...</h3>
-                  <p className="text-slate-500 max-w-md text-center">Checking ATS compatibility, extracting keywords, and generating domain-specific recommendations.</p>
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">Analyzing your resume...</h3>
+                  <div className="w-64 bg-slate-200 rounded-full h-2 mb-2 overflow-hidden shadow-inner">
+                    <div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2 rounded-full transition-all duration-300 ease-out" style={{width: `${uploadProgress}%`}}></div>
+                  </div>
+                  <p className="text-sm text-indigo-600 font-bold mb-4">{uploadProgress}%</p>
+                  <p className="text-slate-500 max-w-md text-center text-sm">Checking ATS compatibility, extracting keywords, and generating domain-specific recommendations.</p>
                 </div>
               )}
 

@@ -21,7 +21,7 @@ class FlashLearnService:
     @staticmethod
     def get_random_flashcards(db: Session, count: int = 10, difficulty: Optional[str] = None, topic: Optional[str] = None, company: Optional[str] = None):
         """Get random flashcards for study, optionally filtered by topic and company"""
-        query = db.query(Flashcard.id)
+        query = db.query(Flashcard)
         if difficulty:
             query = query.filter(Flashcard.difficulty == difficulty)
         if topic:
@@ -29,11 +29,8 @@ class FlashLearnService:
         if company:
             query = query.filter(Flashcard.company == company)
 
-        all_ids = [row[0] for row in query.all()]
-        if not all_ids:
-            return []
-        selected_ids = random.sample(all_ids, min(count, len(all_ids)))
-        return db.query(Flashcard).filter(Flashcard.id.in_(selected_ids)).all()
+        # Offload randomization to the SQL engine for infinite scalability
+        return query.order_by(func.random()).limit(count).all()
 
     @staticmethod
     def get_flashcard_by_id(db: Session, flashcard_id: int):
