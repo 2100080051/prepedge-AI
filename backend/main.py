@@ -3,6 +3,7 @@ FastAPI Application Entry Point
 Loads the main app from app.routes
 """
 
+import os
 import uvicorn
 import logging
 from app.config import settings
@@ -46,10 +47,11 @@ except Exception as e:
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
+    port = int(os.getenv("PORT") or os.getenv("WEBSITES_PORT") or settings.PORT or 8000)
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(settings.PORT or 8000),
+        port=port,
         reload=False,
         log_level="info"
     )
