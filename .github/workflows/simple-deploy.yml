@@ -1,0 +1,42 @@
+name: Simple Deploy to Azure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Backend to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: prepedge-api-prod
+          package: ./backend
+          slot-name: production
+
+      - name: Deploy Frontend to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: prepedge-web-prod
+          package: ./frontend
+          slot-name: production
+
+      - name: Deployment Complete
+        run: |
+          echo "✅ Backend API deployed to: https://prepedge-api-prod.azurewebsites.net"
+          echo "✅ Frontend Web deployed to: https://prepedge-web-prod.azurewebsites.net"
