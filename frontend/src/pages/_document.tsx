@@ -1,4 +1,5 @@
 import { Html, Head, Main, NextScript } from 'next/document';
+import Script from 'next/script';
 
 export default function Document() {
   return (
@@ -23,6 +24,9 @@ export default function Document() {
         <meta property="og:site_name" content="PrepEdge AI" />
         <meta property="og:image" content="/og-image.png" />
         <meta name="twitter:card" content="summary_large_image" />
+
+        {/* Google Sign-In SDK */}
+        <script src="https://accounts.google.com/gsi/client" async defer></script>
       </Head>
       <body className="min-h-screen bg-slate-50 text-slate-800">
         <Main />
